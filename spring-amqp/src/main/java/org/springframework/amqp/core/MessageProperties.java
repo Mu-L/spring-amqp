@@ -36,6 +36,7 @@ import org.springframework.util.Assert;
  * @author Artem Bilan
  * @author Csaba Soti
  * @author Raylax Grey
+ * @author Ngoc Nhan
  */
 public class MessageProperties implements Serializable {
 
@@ -62,6 +63,13 @@ public class MessageProperties implements Serializable {
 	public static final String SPRING_AUTO_DECOMPRESS = "springAutoDecompress";
 
 	public static final String X_DELAY = "x-delay";
+
+	/**
+	 * The custom header to represent a number of retries a message is republished.
+	 * In case of server-side DLX, this header contains the value of {@code x-death.count} property.
+	 * When republish is done manually, this header has to be incremented by the application.
+	 */
+	public static final String RETRY_COUNT = "retry-count";
 
 	public static final String DEFAULT_CONTENT_TYPE = CONTENT_TYPE_BYTES;
 
@@ -130,6 +138,8 @@ public class MessageProperties implements Serializable {
 	private Long receivedDelay;
 
 	private MessageDeliveryMode receivedDeliveryMode;
+
+	private long retryCount;
 
 	private boolean finalRetryForMessageWithNoId;
 
@@ -468,6 +478,33 @@ public class MessageProperties implements Serializable {
 		this.headers.put(X_DELAY, delay);
 	}
 
+	/**
+	 * The number of retries for this message over broker.
+	 * @return the retry count
+	 * @since 3.2
+	 */
+	public long getRetryCount() {
+		return this.retryCount;
+	}
+
+	/**
+	 * Set a number of retries for this message over broker.
+	 * @param retryCount the retry count.
+	 * @since 3.2
+	 * @see #incrementRetryCount()
+	 */
+	public void setRetryCount(long retryCount) {
+		this.retryCount = retryCount;
+	}
+
+	/**
+	 * Increment a retry count for this message when it is re-published back to the broker.
+	 * @since 3.2
+	 */
+	public void incrementRetryCount() {
+		this.retryCount++;
+	}
+
 	public boolean isFinalRetryForMessageWithNoId() {
 		return this.finalRetryForMessageWithNoId;
 	}
@@ -776,14 +813,9 @@ public class MessageProperties implements Serializable {
 			return false;
 		}
 		if (this.userId == null) {
-			if (other.userId != null) {
-				return false;
-			}
+			return other.userId == null;
 		}
-		else if (!this.userId.equals(other.userId)) {
-			return false;
-		}
-		return true;
+		return this.userId.equals(other.userId);
 	}
 
 	@Override // NOSONAR complexity

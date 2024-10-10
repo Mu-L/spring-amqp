@@ -42,6 +42,7 @@ import com.rabbitmq.client.LongString;
  * @author Soeren Unruh
  * @author Raylax Grey
  * @author Artem Bilan
+ * @author Ngoc Nhan
  *
  * @since 1.0
  */
@@ -100,6 +101,12 @@ public class DefaultMessagePropertiesConverter implements MessagePropertiesConve
 						target.setHeader(key, receivedDelayLongValue);
 					}
 				}
+				else if (MessageProperties.RETRY_COUNT.equals(key)) {
+					Object value = entry.getValue();
+					if (value instanceof Number numberValue) {
+						target.setRetryCount(numberValue.longValue());
+					}
+				}
 				else {
 					target.setHeader(key, convertLongStringIfNecessary(entry.getValue(), charset));
 				}
@@ -134,13 +141,26 @@ public class DefaultMessagePropertiesConverter implements MessagePropertiesConve
 			target.setRedelivered(envelope.isRedeliver());
 			target.setDeliveryTag(envelope.getDeliveryTag());
 		}
+
+		if (target.getRetryCount() == 0) {
+			List<Map<String, ?>> xDeathHeader = target.getXDeathHeader();
+			if (!CollectionUtils.isEmpty(xDeathHeader)) {
+				target.setRetryCount((long) xDeathHeader.get(0).get("count"));
+			}
+		}
+
 		return target;
 	}
 
 	@Override
 	public BasicProperties fromMessageProperties(final MessageProperties source, final String charset) {
 		BasicProperties.Builder target = new BasicProperties.Builder();
-		target.headers(this.convertHeadersIfNecessary(source.getHeaders()))
+		Map<String, Object> headers = convertHeadersIfNecessary(source.getHeaders());
+		long retryCount = source.getRetryCount();
+		if (retryCount > 0) {
+			headers.put(MessageProperties.RETRY_COUNT, retryCount);
+		}
+		target.headers(headers)
 			.timestamp(source.getTimestamp())
 			.messageId(source.getMessageId())
 			.userId(source.getUserId())
@@ -256,27 +276,24 @@ public class DefaultMessagePropertiesConverter implements MessagePropertiesConve
 	 * @return the converted string.
 	 */
 	private Object convertLongStringIfNecessary(Object valueArg, String charset) {
-		Object value = valueArg;
-		if (value instanceof LongString longStr) {
-			value = convertLongString(longStr, charset);
+		if (valueArg instanceof LongString longStr) {
+			return convertLongString(longStr, charset);
 		}
-		else if (value instanceof List<?>) {
-			List<Object> convertedList = new ArrayList<>(((List<?>) value).size());
-			for (Object listValue : (List<?>) value) {
-				convertedList.add(this.convertLongStringIfNecessary(listValue, charset));
-			}
-			value = convertedList;
+
+		if (valueArg instanceof List<?> values) {
+			List<Object> convertedList = new ArrayList<>(values.size());
+			values.forEach(value -> convertedList.add(this.convertLongStringIfNecessary(value, charset)));
+			return convertedList;
 		}
-		else if (value instanceof Map<?, ?>) {
-			@SuppressWarnings("unchecked")
-			Map<String, Object> originalMap = (Map<String, Object>) value;
+
+		if (valueArg instanceof Map<?, ?> originalMap) {
 			Map<String, Object> convertedMap = new HashMap<>();
-			for (Map.Entry<String, Object> entry : originalMap.entrySet()) {
-				convertedMap.put(entry.getKey(), this.convertLongStringIfNecessary(entry.getValue(), charset));
-			}
-			value = convertedMap;
+			originalMap.forEach(
+				(key, value) -> convertedMap.put((String) key, this.convertLongStringIfNecessary(value, charset)));
+			return convertedMap;
 		}
-		return value;
+
+		return valueArg;
 	}
 
 }
